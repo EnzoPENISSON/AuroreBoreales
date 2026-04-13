@@ -25,14 +25,6 @@ for file in x_files:
         fieldnames = reader.fieldnames
 
         for row in reader:
-            if row["Date"] == "20070102025643":
-                continue
-                row["X"] = "9001.0"
-                print(row["X"], float(row["X"]))
-                if not (X_MIN <= float(row["X"]) <= X_MAX):
-                    print("KO")
-
-
             raw = row["X"]
             try:
                 x_value = float(raw)
@@ -47,7 +39,10 @@ for file in x_files:
     with open(out_file, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
         writer.writeheader()
-        writer.writerows(rows)
+
+        for i in range(0, len(rows), 10000):
+            chunk = rows[i:min(i + 10000, len(rows) + 1)]
+            writer.writerows(chunk)
 
     cleaned = sum(1 for r in rows if r["X"] == "")
     print(f"[OK] {out_file.name}  —  {cleaned}/{len(rows)} valeurs effacées")
