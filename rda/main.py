@@ -1,3 +1,6 @@
+import csv
+from pathlib import Path
+
 def generate_files(base_path, start_year, end_year, start_month=1, end_month=12):
     files = []
 
@@ -29,8 +32,40 @@ solar_wind_files += generate_files(
 )
 
 def run():
-    print(x_files)
-    print(solar_wind_files)
+    out_file = "data/mag-kiruna-compiled/smooth.csv"
+    with open(out_file, "w") as f:
+        writer = csv.DictWriter(f, fieldnames=["Date", "X"], delimiter=";")
+        writer.writeheader()
+
+    for file in x_files:
+        print(file)
+
+        rows = []
+        with open(file, newline="") as f:
+            reader = csv.DictReader(f, delimiter=";")
+            fieldnames = reader.fieldnames
+
+            index = 0
+            values = []
+
+            for row in reader:
+                if row["X"] != "":
+                    values.append(float(row["X"]))
+
+                if index % 15 == 14:
+                    newRow = row.copy()
+                    newRow["X"] = smooth(values)
+                    rows.append(newRow)
+                    values = []
+
+                index += 1
+  
+        with open(out_file, "a") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
+
+            for i in range(0, len(rows), 10000):
+                chunk = rows[i:min(i + 10000, len(rows) + 1)]
+                writer.writerows(chunk)
 
 
 def smooth(inputs):
@@ -39,14 +74,10 @@ def smooth(inputs):
     for x in inputs:
         avg += x
 
-    avg /= len(inputs)
+    if len(inputs) != 0:
+        avg /= len(inputs)
 
-    return avg
-
-
-def merge():
-    pass
-
+    return round(avg, 2)
 
 if __name__ == '__main__':
     run()
