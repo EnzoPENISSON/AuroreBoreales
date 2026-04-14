@@ -47,16 +47,25 @@ def run():
 
             index = 0
             values = []
-
+            
             for row in reader:
                 if row["X"] != "":
                     values.append(float(row["X"]))
 
-                if index % 60 == 59:
-                    newRow = row.copy()
-                    newRow["X"] = smooth(values)
-                    rows.append(newRow)
-                    values = []
+                if int(row["Date"]) >= 20160726000000:
+                    if index % 15 == 14:
+                        newRow = row.copy()
+                        newRow["X"] = smooth(values)
+                        rows.append(newRow)
+                        values = []
+
+                else:
+                    if index % 60 == 59:
+                        newRow = row.copy()
+                        newRow["X"] = smooth(values)
+                        rows.append(newRow)
+                        values = []
+
 
                 index += 1
   
