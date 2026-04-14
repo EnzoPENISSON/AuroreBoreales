@@ -52,7 +52,7 @@ def run():
                 if row["X"] != "":
                     values.append(float(row["X"]))
 
-                if index % 15 == 14:
+                if index % 60 == 59:
                     newRow = row.copy()
                     newRow["X"] = smooth(values)
                     rows.append(newRow)
