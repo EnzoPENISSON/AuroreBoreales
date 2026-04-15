@@ -9,10 +9,10 @@ from pathlib import Path
 
 DATE_FORMAT = "%Y%m%d%H%M%S"
 DEFAULT_INPUT_CANDIDATES = [
-	Path("data/solarwinds-ace/smooth_solarwinds_filled.csv"),
-	Path("data/solarwinds-ace/smooth-solarwinds_filled.csv"),
+	Path("data/solarwinds-ace-compiled/smooth_solarwinds_filled.csv"),
+	Path("data/solarwinds-ace-compiled/smooth-solarwinds_filled.csv"),
 ]
-DEFAULT_OUTPUT = Path("data/solarwinds-ace/smooth_solarwinds_15min_metrics.csv")
+DEFAULT_OUTPUT = Path("data/solarwinds-ace-compiled/smooth_solarwinds_15min_metrics.csv")
 
 
 @dataclass

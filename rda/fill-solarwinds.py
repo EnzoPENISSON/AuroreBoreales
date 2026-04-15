@@ -5,8 +5,8 @@ import csv
 from pathlib import Path
 
 
-DEFAULT_INPUT = Path("data/solarwinds-ace/smooth-solarwinds.csv")
-DEFAULT_OUTPUT = Path("data/solarwinds-ace/smooth-solarwinds_filled.csv")
+DEFAULT_INPUT = Path("data/solarwinds-ace-compiled/smooth.csv")
+DEFAULT_OUTPUT = Path("data/solarwinds-ace-compiled/smooth-solarwinds_filled.csv")
 VALUE_COLUMNS = ["Speed", "Density", "Bt", "Bz"]
 
 
