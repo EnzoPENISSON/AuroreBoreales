@@ -5,18 +5,21 @@ from predict import train_model
 
 
 def run_distributed_training(rank, world_size, master_addr, master_port):
+    # 1. Set environment variables for the process group
     os.environ['MASTER_ADDR'] = master_addr
     os.environ['MASTER_PORT'] = str(master_port)
-    os.environ['RANK'] = str(rank)
-    os.environ['WORLD_SIZE'] = str(world_size)
+    os.environ['NODE_RANK'] = str(rank)
 
-    # ← AJOUTER CES LIGNES :
-    os.environ['GLOO_SOCKET_IFNAME'] = 'eth0'  # Sur Linux, remplacer par votre interface réseau
-    # ou 'en0' sur macOS, etc.
+    # 2. PyTorch Lightning (Darts) uses these to identify the cluster
+    # Setting these manually ensures the DDP strategy connects correctly
+    os.environ['WORLD_SIZE'] = str(world_size)
+    os.environ['RANK'] = str(rank)
 
     print(f"--- Initializing Node Rank {rank} of {world_size} ---")
     print(f"--- Connecting to Master at {master_addr}:{master_port} ---")
 
+    # 3. Call your existing training function
+    # The 'strategy': 'ddp' in your predict.py will pick up these env vars
     train_model(retrain=False)
 
 
