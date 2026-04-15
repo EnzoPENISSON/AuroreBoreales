@@ -34,7 +34,7 @@ solar_wind_files_dscovr = generate_files(
 def run():
     out_file = "data/solarwinds-ace-compiled/smooth.csv"
     with open(out_file, "w") as f:
-        writer = csv.DictWriter(f, fieldnames=["Date", "X"], delimiter=";")
+        writer = csv.DictWriter(f, fieldnames=["Date", "Speed", "Density", "Bt", "Bz"], delimiter=";")
         writer.writeheader()
 
     for file in solar_wind_files_ace:
