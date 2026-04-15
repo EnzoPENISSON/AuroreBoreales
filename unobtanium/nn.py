@@ -7,7 +7,9 @@ import torch.nn as nn
 import torch.optim as optim
 
 # Load your data
-df = pd.read_csv('data/solarwinds-ace-compiled/smooth_solarwinds_15min_metrics.csv')  # Replace with your file path
+df = pd.read_csv('data/solarwinds-ace-compiled/smooth_solarwinds_15min_metrics.csv', sep=";")  # Replace with your file path
+
+print(df.columns)
 
 # Drop 'Date' and use all other columns except 'Kp' as features
 X = df.drop(columns=["Date", "Kp"]).values

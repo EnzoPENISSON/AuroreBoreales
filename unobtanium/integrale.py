@@ -33,6 +33,7 @@ class WindowState:
 	prev_density_time: datetime | None = None
 	prev_speed_value: float | None = None
 	prev_speed_time: datetime | None = None
+	kp: float | None = None
 
 
 def resolve_input_path(cli_input: str | None) -> Path:
