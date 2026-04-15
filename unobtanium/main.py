@@ -5,6 +5,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
+import random as rnd
 
 # --- Load Data ---
 def load_real_data():
@@ -79,7 +80,7 @@ def collate_fn(batch):
 
 # --- Model ---
 class SolarWindLSTM(nn.Module):
-    def __init__(self, input_size=5, hidden_size=128, num_layers=3, output_size=10):
+    def __init__(self, input_size=5, hidden_size=48, num_layers=1, output_size=10):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
@@ -110,8 +111,16 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, batch_size=32, collate_fn=collate_fn)
 
     model = SolarWindLSTM()
+
+    with torch.no_grad():
+        for name, param in model.lstm.named_parameters():
+            if 'weight' in name:
+                param.fill_(rnd.random())  # Example: Fill with 0.05
+            elif 'bias' in name:
+                param.fill_(rnd.random())  # Example: Fill with 0.01
+
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.002)
+    optimizer = optim.Adam(model.parameters(), lr=0.004)
 
     for epoch in range(500):
         model.train()

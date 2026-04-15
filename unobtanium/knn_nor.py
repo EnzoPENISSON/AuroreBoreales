@@ -4,6 +4,7 @@ import pandas as pd
 # Load your data
 source1 = pd.read_csv('data/mag-kiruna-compiled/smooth.csv', delimiter=";")
 source2 = pd.read_csv('data/solarwinds-ace-compiled/smooth.csv', delimiter=";")
+source3 = pd.read_csv('data/kp-compiled/smooth.csv', delimiter=";")
 
 # Function to normalize all numeric columns except those in exclude_columns
 def normalize_to_01_except(df, exclude_columns):
@@ -16,10 +17,13 @@ exclude_source1 = ['Date']  # Add more columns if needed
 exclude_source2 = ['Date']  # Add more columns if needed
 
 # Normalize and save
-source1_normalized = normalize_to_01_except(source1, exclude_source1)
-source2_normalized = normalize_to_01_except(source2, exclude_source2)
+# source1_normalized = normalize_to_01_except(source1, exclude_source1)
+# source2_normalized = normalize_to_01_except(source2, exclude_source2)
 
-data = pd.merge(source1_normalized, source2_normalized, "inner", "Date")
+data = pd.merge(source1, source2, "inner", "Date")
+data = pd.merge(data, source3, "inner", "Date")
+
+
 
 # Save to new files
 data.to_csv('data/mag-kiruna-compiled/smooth_normalized2.csv', sep=";", index=False)
