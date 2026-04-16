@@ -64,7 +64,7 @@ OUTPUT_CHUNK = 2
 ROLLING_BASELINE_HOURS = 24
 
 BATCH_SIZE = 64
-N_EPOCHS = 1
+N_EPOCHS = 10
 HIDDEN_SIZE = 128
 LSTM_LAYERS = 2
 ATTENTION_HEADS = 4
@@ -103,6 +103,11 @@ KP_FEATURE_COLS = ["X_pert_abs", "coupling", "Bz_south_abs", "Pdyn", "Speed", "B
 
 def _ts_float32(ts: TimeSeries) -> TimeSeries:
     return ts.astype(np.float32)
+
+def travel_time_minutes(speed_km_s: float) -> float:
+    if speed_km_s <= 0:
+        return float("inf")
+    return L1_DISTANCE_KM / speed_km_s / 60.0
 
 class ValidationGuard(Callback):
     """
@@ -229,6 +234,9 @@ def load_and_prepare(data_dir: Path = DATA_DIR, use_cache: bool = True) -> pd.Da
     kiruna = kiruna.set_index("Date").resample("1h").mean()
     sw = sw.set_index("Date").resample("1h").mean()
     kp = kp.set_index("Date").resample("1h").mean().interpolate(method="linear")
+
+    # Décalage d'1h des mesures DSCOVR/L1 vers la Terre
+    sw[["Speed", "Density", "Bt", "Bz"]] = sw[["Speed", "Density", "Bt", "Bz"]].shift(1)
 
     df = kiruna.join(sw, how="inner").join(kp, how="left")
     df = df.interpolate(method="linear")
@@ -503,6 +511,16 @@ def load_dscovr_file_scenario_context(
         merged["Kp"] = pd.to_numeric(merged["Kp"], errors="coerce")
 
     merged = merged.reset_index()
+
+    # Même logique qu'à l'entraînement : décalage L1 -> Terre
+    merged[["Speed", "Density", "Bt", "Bz"]] = (
+        merged[["Speed", "Density", "Bt", "Bz"]].shift(1)
+    )
+
+    merged[["Speed", "Density", "Bt", "Bz"]] = (
+        merged[["Speed", "Density", "Bt", "Bz"]].interpolate(method="linear", limit_direction="both")
+    )
+
     merged = _add_engineered_features(merged)
 
     keep_cols = [
@@ -637,7 +655,7 @@ def forecast_from_dscovr_files(
 
     results = pd.DataFrame(
         {
-            "Date": pdf.index,
+            "forecast_time": pdf.index,
             "X_pert_predicted_nT": x_pert_pred,
             "X_absolute_estimated_nT": baseline_last + x_pert_pred,
             "Kp_estimated": kp_pred,
@@ -645,6 +663,24 @@ def forecast_from_dscovr_files(
             "min_latitude_deg": kp_to_aurora_latitude(kp_pred),
         }
     )
+
+    effective_speed = float(recent_past["Speed"].iloc[-1])
+
+    if effective_speed > 0:
+        tt_h = travel_time_hours(effective_speed)
+        tt_min = tt_h * 60.0
+
+        results["solar_wind_speed_km_s"] = effective_speed
+        results["propagation_delay_h"] = tt_h
+        #results["earth_arrival_time"] = (
+        #        pd.to_datetime(results["forecast_time"]) + pd.to_timedelta(tt_h, unit="h")
+        #)
+
+        print(
+            f"\nÀ la vitesse actuelle ({effective_speed:.1f} km/s), "
+            f"le vent solaire met environ {tt_min:.0f} minutes "
+            f"({tt_h:.2f} h) pour se propager de L1 à la Terre."
+        )
 
     title = label or f"{Path(mag_path).name} + {Path(plasma_path).name}"
     print(f"\n=== PRÉVISIONS SCÉNARIO: {title} ===")
@@ -1210,6 +1246,16 @@ def load_recent_realtime_context(base_df: pd.DataFrame) -> pd.DataFrame:
         merged["Kp"] = pd.to_numeric(merged["Kp"], errors="coerce")
 
     merged = merged.reset_index().rename(columns={"index": "Date"})
+
+    # Même logique qu'à l'entraînement : on décale le vent solaire d'1h
+    merged[["Speed", "Density", "Bt", "Bz"]] = (
+        merged[["Speed", "Density", "Bt", "Bz"]].shift(1)
+    )
+
+    merged[["Speed", "Density", "Bt", "Bz"]] = (
+        merged[["Speed", "Density", "Bt", "Bz"]].interpolate(method="linear", limit_direction="both")
+    )
+
     merged = _add_engineered_features(merged)
 
     keep_cols = [
@@ -1373,11 +1419,25 @@ def forecast(n_hours: int = 5, current_speed: float | None = None, use_realtime:
         }
     )
 
-    if current_speed and current_speed > 0:
-        tt = travel_time_hours(current_speed)
-        results["travel_time_h"] = tt
+    effective_speed = current_speed
+    if effective_speed is None:
+        effective_speed = float(recent_past["Speed"].iloc[-1])
+
+    if effective_speed > 0:
+        tt_h = travel_time_hours(effective_speed)
+        tt_min = tt_h * 60.0
+
+        results["solar_wind_speed_km_s"] = effective_speed
+        results["propagation_delay_h"] = tt_h
+        #results["earth_arrival_time"] = pd.to_datetime(results["Date"]) + pd.to_timedelta(tt_h, unit="h")
+
         scale = "forte" if kp_pred.max() >= 5 else "modérée" if kp_pred.max() >= 3 else "faible"
-        print(f"\nVitesse vent solaire : {current_speed:.0f} km/s → arrivée estimée : {tt:.1f} h")
+
+        print(
+            f"\nÀ la vitesse actuelle ({effective_speed:.1f} km/s), "
+            f"le vent solaire met environ {tt_min:.0f} minutes "
+            f"({tt_h:.2f} h) pour se propager de L1 à la Terre."
+        )
         print(f"Perturbation prévue : {scale} (Kp estimé max = {kp_pred.max():.1f})")
 
     print("\n=== PRÉVISIONS ===")
