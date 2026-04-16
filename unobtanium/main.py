@@ -104,35 +104,6 @@ def calculate_accuracy(outputs, targets):
     accuracy = correct / targets.size(0)
     return accuracy
 
-def train_model():
-    for epoch in range(4000):
-        model.train()
-        total_loss = 0
-        total_acc = 0
-        valid_batches = 0
-
-        for batch_features, batch_targets in dataloader:
-            if torch.isnan(batch_features).any():
-                continue
-
-            optimizer.zero_grad()
-            outputs = model(batch_features)
-
-            if torch.isnan(outputs).any():
-                continue
-
-            loss = criterion(outputs, batch_targets)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-
-            total_loss += loss.item()
-            total_acc += calculate_accuracy(outputs, batch_targets)
-            valid_batches += 1
-
-        print(f'Epoch {epoch+1}, Loss: {total_loss/valid_batches:.4f}, Accuracy: {total_acc/valid_batches:.4f}')
-
-    return epoch, total_loss
 
 # --- Main ---
 if __name__ == "__main__":
