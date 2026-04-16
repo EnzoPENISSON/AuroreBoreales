@@ -12,6 +12,7 @@ DEFAULT_INPUT_CANDIDATES = [
 	Path("data/solarwinds-ace-compiled/smooth_solarwinds_filled.csv"),
 	Path("data/solarwinds-ace-compiled/smooth-solarwinds_filled.csv"),
 ]
+DEFAULT_KP_INPUT = Path("data/kp-compiled/smooth.csv")
 DEFAULT_OUTPUT = Path("data/solarwinds-ace-compiled/smooth_solarwinds_15min_metrics.csv")
 
 
@@ -73,11 +74,12 @@ def floor_15min(timestamp: datetime) -> datetime:
 	return timestamp.replace(minute=minute, second=0, microsecond=0)
 
 
-def write_window(writer: csv.DictWriter, state: WindowState) -> None:
+def write_window(writer: csv.DictWriter, state: WindowState, kp_by_window: dict[str, float | None]) -> None:
 	"""Écrit l'état d'une fenêtre 15 minutes dans le CSV de sortie."""
+	window_key = state.start.strftime(DATE_FORMAT)
 	writer.writerow(
 		{
-			"Date": state.start.strftime(DATE_FORMAT),
+			"Date": window_key,
 			"Bt_integral_15m": state.bt_integral if state.prev_bt_time is not None else None,
 			"Bt_max_15m": state.bt_max,
 			"Bt_min_15m": state.bt_min,
@@ -87,13 +89,46 @@ def write_window(writer: csv.DictWriter, state: WindowState) -> None:
 			"Speed_integral_15m": state.speed_integral if state.prev_speed_time is not None else None,
 			"Speed_max_15m": state.speed_max,
 			"Speed_min_15m": state.speed_min,
+			"Kp": kp_by_window.get(window_key),
 		}
 	)
 
 
-def aggregate_15min_to_csv(input_path: Path, output_path: Path) -> int:
+def load_kp_by_window(kp_path: Path) -> dict[str, float | None]:
+	"""Charge Kp et ramène les valeurs sur des fenêtres de 15 minutes."""
+	if not kp_path.exists():
+		raise FileNotFoundError(f"Fichier Kp introuvable: {kp_path}")
+
+	kp_by_window: dict[str, float | None] = {}
+	with kp_path.open("r", encoding="utf-8", newline="") as kp_file:
+		reader = csv.DictReader(kp_file, delimiter=";")
+		if reader.fieldnames is None:
+			raise ValueError(f"CSV Kp vide ou sans en-tête: {kp_path}")
+		required_columns = {"Date", "Kp"}
+		if not required_columns.issubset(set(reader.fieldnames)):
+			missing = sorted(required_columns - set(reader.fieldnames))
+			raise ValueError(f"Colonnes manquantes dans {kp_path.name}: {missing}")
+
+		for row in reader:
+			raw_date = (row.get("Date") or "").strip()
+			try:
+				timestamp = datetime.strptime(raw_date, DATE_FORMAT)
+			except ValueError:
+				continue
+
+			window_key = floor_15min(timestamp).strftime(DATE_FORMAT)
+			kp_value = parse_optional_float(row.get("Kp"))
+			if kp_value is not None:
+				# On garde la dernière valeur observée dans la fenêtre.
+				kp_by_window[window_key] = kp_value
+
+	return kp_by_window
+
+
+def aggregate_15min_to_csv(input_path: Path, output_path: Path, kp_path: Path) -> int:
 	"""Agrège le CSV source par fenêtres de 15 minutes et écrit le CSV de métriques."""
 	output_path.parent.mkdir(parents=True, exist_ok=True)
+	kp_by_window = load_kp_by_window(kp_path)
 
 	total_rows = 0
 	current: WindowState | None = None
@@ -120,6 +155,7 @@ def aggregate_15min_to_csv(input_path: Path, output_path: Path) -> int:
 				"Speed_integral_15m",
 				"Speed_max_15m",
 				"Speed_min_15m",
+				"Kp",
 			],
 			delimiter=";",
 		)
@@ -136,7 +172,7 @@ def aggregate_15min_to_csv(input_path: Path, output_path: Path) -> int:
 			if current is None:
 				current = WindowState(start=window_start)
 			elif window_start != current.start:
-				write_window(writer, current)
+				write_window(writer, current, kp_by_window)
 				total_rows += 1
 				current = WindowState(start=window_start)
 
@@ -187,7 +223,7 @@ def aggregate_15min_to_csv(input_path: Path, output_path: Path) -> int:
 				current.prev_speed_time = timestamp
 
 		if current is not None:
-			write_window(writer, current)
+			write_window(writer, current, kp_by_window)
 			total_rows += 1
 
 	return total_rows
@@ -203,6 +239,11 @@ def parse_args() -> argparse.Namespace:
 		help="Chemin du CSV source (smooth_solarwinds_filled.csv).",
 	)
 	parser.add_argument(
+		"--kp-input",
+		default=str(DEFAULT_KP_INPUT),
+		help="Chemin du CSV source Kp (Date;Kp).",
+	)
+	parser.add_argument(
 		"--output",
 		default=str(DEFAULT_OUTPUT),
 		help="Chemin du CSV de sortie des métriques 15 minutes.",
@@ -213,11 +254,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
 	args = parse_args()
 	input_path = resolve_input_path(args.input)
+	kp_path = Path(args.kp_input)
 	output_path = Path(args.output)
 
-	row_count = aggregate_15min_to_csv(input_path, output_path)
+	row_count = aggregate_15min_to_csv(input_path, output_path, kp_path)
 
 	print(f"CSV source : {input_path}")
+	print(f"CSV Kp     : {kp_path}")
 	print(f"CSV écrit  : {output_path}")
 	print(f"Lignes     : {row_count}")
 
