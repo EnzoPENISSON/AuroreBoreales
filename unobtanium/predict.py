@@ -59,12 +59,12 @@ DATA_DIR = Path("../data")
 MODEL_DIR = Path(__file__).resolve().parent / "models"
 CACHE_PATH = Path(__file__).resolve().parent / "cache" / "hourly_dataset.parquet"
 
-INPUT_CHUNK = 168
-OUTPUT_CHUNK = 24
+INPUT_CHUNK = 2
+OUTPUT_CHUNK = 2
 ROLLING_BASELINE_HOURS = 24
 
 BATCH_SIZE = 64
-N_EPOCHS = 30
+N_EPOCHS = 1
 HIDDEN_SIZE = 128
 LSTM_LAYERS = 2
 ATTENTION_HEADS = 4
@@ -76,6 +76,10 @@ EARLY_STOP_PATIENCE = 8
 EARLY_STOP_MIN_DELTA = 1e-4
 
 L1_DISTANCE_KM = 1_500_000
+
+# Stop si la validation se dégrade plusieurs epochs d'affilée
+DEGRADE_PATIENCE = 3
+DEGRADE_MIN_DELTA = 1e-4
 
 KIRUNA_RT_URL = "https://www2.irf.se/maggraphs/rt_iaga_last_hour_1min_primary.txt"
 DSCOVR_PLASMA_RT_URL = "https://services.swpc.noaa.gov/text/rtsw/data/plasma-2-hour.i.json"
@@ -99,6 +103,76 @@ KP_FEATURE_COLS = ["X_pert_abs", "coupling", "Bz_south_abs", "Pdyn", "Speed", "B
 
 def _ts_float32(ts: TimeSeries) -> TimeSeries:
     return ts.astype(np.float32)
+
+class ValidationGuard(Callback):
+    """
+    Affiche si val_loss s'améliore / stagne / se dégrade.
+    Arrête l'entraînement si la dégradation persiste plusieurs epochs.
+    """
+
+    def __init__(self, degrade_patience=3, min_delta=1e-4):
+        super().__init__()
+        self.degrade_patience = degrade_patience
+        self.min_delta = min_delta
+        self.best_val = None
+        self.bad_epochs = 0
+        self.prev_val = None
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        metrics = trainer.callback_metrics
+        epoch = trainer.current_epoch + 1
+        val_loss = metrics.get("val_loss")
+
+        try:
+            val = float(val_loss)
+        except Exception:
+            print(f"[Epoch {epoch:03d}] ValidationGuard: val_loss indisponible")
+            return
+
+        if self.best_val is None:
+            self.best_val = val
+            self.prev_val = val
+            print(
+                f"[Epoch {epoch:03d}] ValidationGuard: initialisation "
+                f"(val_loss={val:.6f})"
+            )
+            return
+
+        # amélioration par rapport au meilleur score historique
+        if val < self.best_val - self.min_delta:
+            improvement = self.best_val - val
+            self.best_val = val
+            self.bad_epochs = 0
+            print(
+                f"[Epoch {epoch:03d}] ✅ amélioration "
+                f"val_loss={val:.6f} "
+                f"(gain={improvement:.6f}, best={self.best_val:.6f})"
+            )
+        # dégradation par rapport au meilleur score historique
+        elif val > self.best_val + self.min_delta:
+            degrade = val - self.best_val
+            self.bad_epochs += 1
+            print(
+                f"[Epoch {epoch:03d}] ⚠️ dégradation "
+                f"val_loss={val:.6f} "
+                f"(+{degrade:.6f} vs best={self.best_val:.6f}) "
+                f"| compteur={self.bad_epochs}/{self.degrade_patience}"
+            )
+
+            if self.bad_epochs >= self.degrade_patience:
+                print(
+                    f"[Epoch {epoch:03d}] 🛑 arrêt anticipé : "
+                    f"la val_loss se dégrade depuis {self.bad_epochs} epoch(s)."
+                )
+                trainer.should_stop = True
+        else:
+            print(
+                f"[Epoch {epoch:03d}] ➖ quasi stable "
+                f"val_loss={val:.6f} "
+                f"(best={self.best_val:.6f})"
+            )
+
+        self.prev_val = val
 
 # ===========================================================================
 # DATA LOADING & FEATURE ENGINEERING
@@ -637,6 +711,10 @@ def create_model(n_epochs: int = N_EPOCHS, force_reset: bool = True) -> TFTModel
 
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     csv_logger = CSVLogger(save_dir=str(MODEL_DIR / "logs"), name="aurora_tft")
+    validation_guard = ValidationGuard(
+        degrade_patience=DEGRADE_PATIENCE,
+        min_delta=DEGRADE_MIN_DELTA,
+    )
 
     return TFTModel(
         input_chunk_length=INPUT_CHUNK,
@@ -660,6 +738,7 @@ def create_model(n_epochs: int = N_EPOCHS, force_reset: bool = True) -> TFTModel
                 early_stopper,
                 lr_monitor,
                 EpochStatsPrinter(),
+                validation_guard,
             ],
             "logger": csv_logger,
             "log_every_n_steps": 10,
