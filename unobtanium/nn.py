@@ -12,8 +12,12 @@ df = pd.read_csv('data/solarwinds-ace-compiled/smooth_solarwinds_15min_metrics.c
 
 print(df.columns)
 
+# Ignore Date entirely if present in the source file.
+if "Date" in df.columns:
+    df = df.drop(columns=["Date"])
+
 # Remove rows with missing targets and any non-finite values before training.
-feature_columns = [column for column in df.columns if column not in {"Date", "Kp"}]
+feature_columns = [column for column in df.columns if column != "Kp"]
 df[feature_columns] = df[feature_columns].apply(pd.to_numeric, errors="coerce")
 df["Kp"] = pd.to_numeric(df["Kp"], errors="coerce")
 df = df.replace([np.inf, -np.inf], np.nan)
@@ -24,8 +28,8 @@ if df.empty:
 
 print(f"Rows kept for training: {len(df)}")
 
-# Drop 'Date' and use all other columns except 'Kp' as features
-X = df.drop(columns=["Date", "Kp"]).to_numpy(dtype=np.float32)
+# Use all columns except Kp as features
+X = df[feature_columns].to_numpy(dtype=np.float32)
 Y = df["Kp"].to_numpy(dtype=np.float32)
 
 if not np.isfinite(X).all() or not np.isfinite(Y).all():

@@ -8,11 +8,6 @@ import numpy as np
 
 # --- Load Data ---
 def load_real_data():
-    # Load Source 1: Date, X
-    source1 = pd.read_csv('data/mag-kiruna-compiled/smooth_normalized.csv', delimiter=";", nrows=100000)
-    source1['Date'] = pd.to_datetime(source1['Date'], format="%Y%m%d%H%M%S")
-    source1 = source1.groupby(pd.Grouper(key='Date', freq='15min')).mean(numeric_only=True).reset_index()
-
     # Load Source 2: Date, Speed, Density, Bt, Bz
     source2 = pd.read_csv('data/solarwinds-ace-compiled/smooth_normalized.csv', delimiter=";", nrows=100000)
     source2['Date'] = pd.to_datetime(source2['Date'], format="%Y%m%d%H%M%S")
@@ -24,8 +19,7 @@ def load_real_data():
     correction = correction.groupby(pd.Grouper(key='Date', freq='15min')).mean(numeric_only=True).reset_index()
 
     # Merge all sources on Date
-    data = pd.merge(source1, source2, on='Date', how='inner')
-    data = pd.merge(data, correction, on='Date', how='inner')
+    data = pd.merge(source2, correction, on='Date', how='inner')
 
     # Fill NaN values with the mean of each column
     data = data.fillna(data.mean())
@@ -35,7 +29,6 @@ def load_real_data():
     data = [
         (
             row['Date'],
-            float(row['X']),
             float(row['Speed']),
             float(row['Density']),
             float(row['Bt']),
@@ -64,8 +57,8 @@ class SolarWindDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        date, X, Speed, Density, Bt, Bz, correction = self.data[idx]
-        features = np.array([X, Speed, Density, Bt, Bz], dtype=np.float32)
+        date, Speed, Density, Bt, Bz, correction = self.data[idx]
+        features = np.array([Speed, Density, Bt, Bz], dtype=np.float32)
         correction = int(correction)
         return features, correction  # Return class index, not one-hot
 
@@ -79,7 +72,7 @@ def collate_fn(batch):
 
 # --- Model ---
 class SolarWindLSTM(nn.Module):
-    def __init__(self, input_size=5, hidden_size=128, num_layers=2, output_size=10):
+    def __init__(self, input_size=4, hidden_size=128, num_layers=2, output_size=10):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
