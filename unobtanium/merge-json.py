@@ -1,7 +1,6 @@
 import pandas as pd
 import json
 
-
 def merge(file1, file2, final):
     # Charger fichiers
     with open("data/json/" + file1) as f:

@@ -1,10 +1,8 @@
-import argparse
 from pathlib import Path
 
 import pandas as pd
 import torch
 import torch.nn as nn
-
 
 class SolarWindLSTM(nn.Module):
 	def __init__(self, input_size=4, hidden_size=128, num_layers=2, output_size=10):
@@ -80,55 +78,32 @@ def predict_kp(model, input_df, device):
 	result["confidence"] = confidence.cpu().numpy()
 	return result
 
-
-def main():
-	parser = argparse.ArgumentParser(description="Predict Kp from merged.csv using a trained checkpoint.")
-	parser.add_argument(
-		"-i",
-		"--input",
-		type=Path,
-		default=Path("data/json/merged.csv"),
-		help="Input CSV path (default: data/json/merged.csv)",
-	)
-	parser.add_argument(
-		"-c",
-		"--checkpoint",
-		type=Path,
-		default=Path("model/checkpoint_epoch_4000.pt"),
-		help="Checkpoint path (default: model/checkpoint_epoch_4000.pt)",
-	)
-	parser.add_argument(
-		"-o",
-		"--output",
-		type=Path,
-		default=Path("data/json/merged_kp_predictions.csv"),
-		help="Output CSV path (default: data/json/merged_kp_predictions.csv)",
-	)
-	parser.add_argument(
-		"--no-resample",
-		action="store_true",
-		help="Disable 15-minute resampling before prediction.",
-	)
-
-	args = parser.parse_args()
-
-	if not args.input.exists():
-		raise FileNotFoundError(f"Input CSV not found: {args.input}")
-	if not args.checkpoint.exists():
-		raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
+if __name__ == "__main__":
+	checkpoints_dir = Path("model")
+	input_files = [
+		Path("data/json/merged-storm.csv"),
+		Path("data/json/merged-storm2.csv"),  # adapte si besoin
+	]
 
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	input_df = load_input_data(args.input, resample_15min=not args.no_resample)
-	model = load_model(args.checkpoint, device)
-	predictions_df = predict_kp(model, input_df, device)
+	checkpoints = sorted(checkpoints_dir.glob("checkpoint_epoch_*.pt"))
 
-	args.output.parent.mkdir(parents=True, exist_ok=True)
-	predictions_df.to_csv(args.output, index=False)
+	for input_path in input_files:
+		print(f"\n=== DATASET: {input_path.name} ===")
 
-	print(f"Predictions created: {args.output}")
-	print(f"Rows predicted: {len(predictions_df)}")
-	print(predictions_df.head(5))
+		input_df = load_input_data(input_path, resample_15min=True)
 
+		for checkpoint in checkpoints:
+			print(f"\n--- Model: {checkpoint.name} ---")
 
-if __name__ == "__main__":
-	main()
+			model = load_model(checkpoint, device)
+			predictions_df = predict_kp(model, input_df, device)
+
+			# 💾 nom de sortie propre
+			output_path = Path("results") / f"{input_path.stem}_{checkpoint.stem}.csv"
+			output_path.parent.mkdir(parents=True, exist_ok=True)
+
+			predictions_df.to_csv(output_path, index=False)
+
+			print(f"Saved: {output_path}")
+			print(predictions_df.head(3))
