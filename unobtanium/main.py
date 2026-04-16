@@ -79,7 +79,7 @@ def collate_fn(batch):
 
 # --- Model ---
 class SolarWindLSTM(nn.Module):
-    def __init__(self, input_size=5, hidden_size=128, num_layers=3, output_size=10):
+    def __init__(self, input_size=5, hidden_size=128, num_layers=2, output_size=10):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
@@ -111,9 +111,9 @@ if __name__ == "__main__":
 
     model = SolarWindLSTM()
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.002)
+    optimizer = optim.Adam(model.parameters(), lr=0.0017)
 
-    for epoch in range(500):
+    for epoch in range(5000):
         model.train()
         total_loss = 0
         total_acc = 0
