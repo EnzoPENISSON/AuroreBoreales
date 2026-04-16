@@ -64,7 +64,7 @@ OUTPUT_CHUNK = 2
 ROLLING_BASELINE_HOURS = 24
 
 BATCH_SIZE = 64
-N_EPOCHS = 10
+N_EPOCHS = 1
 HIDDEN_SIZE = 128
 LSTM_LAYERS = 2
 ATTENTION_HEADS = 4
@@ -108,6 +108,51 @@ def travel_time_minutes(speed_km_s: float) -> float:
     if speed_km_s <= 0:
         return float("inf")
     return L1_DISTANCE_KM / speed_km_s / 60.0
+
+
+def propagate_l1_to_earth(df_sw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Décale chaque mesure solaire L1 vers son heure estimée d'arrivée à la Terre
+    en utilisant la vitesse mesurée sur la ligne.
+
+    Entrée attendue :
+        colonnes = Date, Speed, Density, Bt, Bz
+    Sortie :
+        même schéma, mais Date devient l'heure d'arrivée Terre,
+        puis les données sont remises sur une grille horaire.
+    """
+    df_sw = df_sw.copy()
+    df_sw["Date"] = pd.to_datetime(df_sw["Date"], errors="coerce")
+    df_sw = df_sw.dropna(subset=["Date"]).sort_values("Date")
+
+    # vitesse numérique
+    df_sw["Speed"] = pd.to_numeric(df_sw["Speed"], errors="coerce")
+
+    # délai variable ligne par ligne
+    df_sw["prop_delay_h"] = df_sw["Speed"].apply(travel_time_hours)
+
+    # on enlève les vitesses invalides / infinies
+    df_sw = df_sw.replace([np.inf, -np.inf], np.nan)
+    df_sw = df_sw.dropna(subset=["prop_delay_h"])
+
+    # temps d'arrivée Terre
+    df_sw["Date"] = df_sw["Date"] + pd.to_timedelta(df_sw["prop_delay_h"], unit="h")
+
+    # on garde uniquement les colonnes utiles
+    keep_cols = ["Date", "Speed", "Density", "Bt", "Bz"]
+    df_sw = df_sw[keep_cols].copy()
+
+    # remise sur grille horaire
+    df_sw = (
+        df_sw.set_index("Date")
+        .sort_index()
+        .resample("1h")
+        .mean()
+        .interpolate(method="time", limit_direction="both")
+        .reset_index()
+    )
+
+    return df_sw
 
 class ValidationGuard(Callback):
     """
@@ -232,11 +277,14 @@ def load_and_prepare(data_dir: Path = DATA_DIR, use_cache: bool = True) -> pd.Da
     kp["Date"] = pd.to_datetime(kp["Date"], format="%Y%m%d%H%M%S")
 
     kiruna = kiruna.set_index("Date").resample("1h").mean()
-    sw = sw.set_index("Date").resample("1h").mean()
+    sw = sw.set_index("Date").resample("1h").mean().reset_index()
     kp = kp.set_index("Date").resample("1h").mean().interpolate(method="linear")
 
-    # Décalage d'1h des mesures DSCOVR/L1 vers la Terre
-    sw[["Speed", "Density", "Bt", "Bz"]] = sw[["Speed", "Density", "Bt", "Bz"]].shift(1)
+    # Propagation physique variable L1 -> Terre
+    sw = propagate_l1_to_earth(sw)
+
+    # remettre index Date pour le join
+    sw = sw.set_index("Date")
 
     df = kiruna.join(sw, how="inner").join(kp, how="left")
     df = df.interpolate(method="linear")
@@ -512,13 +560,17 @@ def load_dscovr_file_scenario_context(
 
     merged = merged.reset_index()
 
-    # Même logique qu'à l'entraînement : décalage L1 -> Terre
-    merged[["Speed", "Density", "Bt", "Bz"]] = (
-        merged[["Speed", "Density", "Bt", "Bz"]].shift(1)
+    # Propagation physique variable L1 -> Terre
+    sw_earth = propagate_l1_to_earth(
+        merged[["Date", "Speed", "Density", "Bt", "Bz"]].copy()
     )
 
+    merged = merged.drop(columns=["Speed", "Density", "Bt", "Bz"])
+    merged = pd.merge(merged, sw_earth, on="Date", how="left").sort_values("Date")
+
     merged[["Speed", "Density", "Bt", "Bz"]] = (
-        merged[["Speed", "Density", "Bt", "Bz"]].interpolate(method="linear", limit_direction="both")
+        merged[["Speed", "Density", "Bt", "Bz"]]
+        .interpolate(method="linear", limit_direction="both")
     )
 
     merged = _add_engineered_features(merged)
@@ -653,9 +705,22 @@ def forecast_from_dscovr_files(
     baseline_series = df["X"].rolling(ROLLING_BASELINE_HOURS, min_periods=1).mean()
     baseline_last = float(baseline_series.iloc[-1])
 
+    effective_speed = float(recent_past["Speed"].iloc[-1])
+    base_times = pd.to_datetime(pdf.index)
+
+    if effective_speed > 0:
+        tt_h = travel_time_hours(effective_speed)
+        tt_min = tt_h * 60.0
+        arrival_times = base_times + pd.to_timedelta(tt_h, unit="h")
+    else:
+        tt_h = np.nan
+        tt_min = np.nan
+        arrival_times = pd.to_datetime([pd.NaT] * len(base_times))
+
     results = pd.DataFrame(
         {
-            "forecast_time": pdf.index,
+            "model_time": base_times,
+            "arrival_time": arrival_times,
             "X_pert_predicted_nT": x_pert_pred,
             "X_absolute_estimated_nT": baseline_last + x_pert_pred,
             "Kp_estimated": kp_pred,
@@ -664,17 +729,9 @@ def forecast_from_dscovr_files(
         }
     )
 
-    effective_speed = float(recent_past["Speed"].iloc[-1])
-
     if effective_speed > 0:
-        tt_h = travel_time_hours(effective_speed)
-        tt_min = tt_h * 60.0
-
         results["solar_wind_speed_km_s"] = effective_speed
         results["propagation_delay_h"] = tt_h
-        #results["earth_arrival_time"] = (
-        #        pd.to_datetime(results["forecast_time"]) + pd.to_timedelta(tt_h, unit="h")
-        #)
 
         print(
             f"\nÀ la vitesse actuelle ({effective_speed:.1f} km/s), "
@@ -1247,13 +1304,18 @@ def load_recent_realtime_context(base_df: pd.DataFrame) -> pd.DataFrame:
 
     merged = merged.reset_index().rename(columns={"index": "Date"})
 
-    # Même logique qu'à l'entraînement : on décale le vent solaire d'1h
-    merged[["Speed", "Density", "Bt", "Bz"]] = (
-        merged[["Speed", "Density", "Bt", "Bz"]].shift(1)
+    # Propagation physique variable L1 -> Terre
+    sw_earth = propagate_l1_to_earth(
+        merged[["Date", "Speed", "Density", "Bt", "Bz"]].copy()
     )
 
+    # On réinjecte les colonnes propagées dans merged
+    merged = merged.drop(columns=["Speed", "Density", "Bt", "Bz"])
+    merged = pd.merge(merged, sw_earth, on="Date", how="left").sort_values("Date")
+
     merged[["Speed", "Density", "Bt", "Bz"]] = (
-        merged[["Speed", "Density", "Bt", "Bz"]].interpolate(method="linear", limit_direction="both")
+        merged[["Speed", "Density", "Bt", "Bz"]]
+        .interpolate(method="linear", limit_direction="both")
     )
 
     merged = _add_engineered_features(merged)
@@ -1405,12 +1467,29 @@ def forecast(n_hours: int = 5, current_speed: float | None = None, use_realtime:
         )
 
     # baseline récente (moyenne glissante sur les dernières heures connues)
+    # baseline récente (moyenne glissante sur les dernières heures connues)
     baseline_series = df["X"].rolling(ROLLING_BASELINE_HOURS, min_periods=1).mean()
     baseline_last = baseline_series.iloc[-1]
 
+    effective_speed = current_speed
+    if effective_speed is None:
+        effective_speed = float(recent_past["Speed"].iloc[-1])
+
+    base_times = pd.to_datetime(pdf.index)
+
+    if effective_speed > 0:
+        tt_h = travel_time_hours(effective_speed)
+        tt_min = tt_h * 60.0
+        arrival_times = base_times + pd.to_timedelta(tt_h, unit="h")
+    else:
+        tt_h = np.nan
+        tt_min = np.nan
+        arrival_times = pd.to_datetime([pd.NaT] * len(base_times))
+
     results = pd.DataFrame(
         {
-            "Date": pdf.index,
+            "model_time": base_times,
+            "arrival_time": arrival_times,
             "X_pert_predicted_nT": x_pert_pred,
             "X_absolute_estimated_nT": baseline_last + x_pert_pred,
             "Kp_estimated": kp_pred,
@@ -1419,17 +1498,9 @@ def forecast(n_hours: int = 5, current_speed: float | None = None, use_realtime:
         }
     )
 
-    effective_speed = current_speed
-    if effective_speed is None:
-        effective_speed = float(recent_past["Speed"].iloc[-1])
-
     if effective_speed > 0:
-        tt_h = travel_time_hours(effective_speed)
-        tt_min = tt_h * 60.0
-
         results["solar_wind_speed_km_s"] = effective_speed
         results["propagation_delay_h"] = tt_h
-        #results["earth_arrival_time"] = pd.to_datetime(results["Date"]) + pd.to_timedelta(tt_h, unit="h")
 
         scale = "forte" if kp_pred.max() >= 5 else "modérée" if kp_pred.max() >= 3 else "faible"
 
@@ -1443,7 +1514,6 @@ def forecast(n_hours: int = 5, current_speed: float | None = None, use_realtime:
     print("\n=== PRÉVISIONS ===")
     print(results.to_string(index=False))
     return results
-
 
 # ===========================================================================
 # VALIDATION
