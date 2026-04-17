@@ -31,6 +31,12 @@ def load_input_data(csv_path, resample_15min=True):
 
 	df = df.dropna(subset=required_columns)
 
+	# Normalisation selon les valeurs min/max utilisées durant l'entraînement
+	df["speed"] = (df["speed"] - 0.0) / (1209.40 - 0.0)
+	df["density"] = (df["density"] - 0.0) / (199.70 - 0.0)
+	df["bt"] = (df["bt"] - 0.0) / (74.66 - 0.0)
+	df["bz_gsm"] = (df["bz_gsm"] - (-49.85)) / (49.03 - (-49.85))
+
 	if resample_15min:
 		df = (
 			df.set_index("time_tag")
@@ -78,17 +84,27 @@ def predict_kp(model, input_df, device):
 	result["confidence"] = confidence.cpu().numpy()
 	return result
 
+import sys
+
 if __name__ == "__main__":
 	checkpoints_dir = Path("model")
-	input_files = [
-		Path("data/json/merged-storm.csv"),
-		Path("data/json/merged-storm2.csv"),  # adapte si besoin
-	]
+	
+	if len(sys.argv) > 1:
+		input_files = [Path(f) for f in sys.argv[1:] if Path(f).suffix == '.csv']
+	else:
+		input_files = [
+			Path("data/json/merged-storm.csv"),
+			Path("data/json/merged.csv"),  # adapte si besoin
+		]
 
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	checkpoints = sorted(checkpoints_dir.glob("checkpoint_epoch_*.pt"))
 
 	for input_path in input_files:
+		if not input_path.exists():
+			print(f"File not found: {input_path}")
+			continue
+
 		print(f"\n=== DATASET: {input_path.name} ===")
 
 		input_df = load_input_data(input_path, resample_15min=True)

@@ -9,7 +9,7 @@ import numpy as np
 # --- Load Data ---
 def load_real_data():
     # Load Source 2: Date, Speed, Density, Bt, Bz
-    source2 = pd.read_csv('data/solarwinds-ace-compiled/smooth_normalized.csv', delimiter=";", nrows=100000)
+    source2 = pd.read_csv('data/solarwinds-ace-compiled/smooth-solarwinds.csv', delimiter=";", nrows=100000)
     source2['Date'] = pd.to_datetime(source2['Date'], format="%Y%m%d%H%M%S")
     source2 = source2.groupby(pd.Grouper(key='Date', freq='15min')).mean(numeric_only=True).reset_index()
 
@@ -28,7 +28,7 @@ def load_real_data():
     data_list = data.to_dict('records')
     data = [
         (
-            row['Date'],
+            float(row['Date'].timestamp()),  # Convert datetime to timestamp
             float(row['Speed']),
             float(row['Density']),
             float(row['Bt']),
@@ -58,7 +58,7 @@ class SolarWindDataset(Dataset):
 
     def __getitem__(self, idx):
         date, Speed, Density, Bt, Bz, correction = self.data[idx]
-        features = np.array([Speed, Density, Bt, Bz], dtype=np.float32)
+        features = np.array([date, Speed, Bt], dtype=np.float32)
         correction = int(correction)
         return features, correction  # Return class index, not one-hot
 
@@ -72,7 +72,7 @@ def collate_fn(batch):
 
 # --- Model ---
 class SolarWindLSTM(nn.Module):
-    def __init__(self, input_size=4, hidden_size=128, num_layers=2, output_size=10):
+    def __init__(self, input_size=3, hidden_size=16, num_layers=1, output_size=10):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
@@ -101,11 +101,11 @@ def calculate_accuracy(outputs, targets):
 # --- Main ---
 if __name__ == "__main__":
     dataset = SolarWindDataset(data)
-    dataloader = DataLoader(dataset, batch_size=32, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=16, collate_fn=collate_fn)
 
     model = SolarWindLSTM()
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.0017)
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     for epoch in range(4000):
         model.train()
