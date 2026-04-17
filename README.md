@@ -39,3 +39,9 @@ python predict.py validate
     ```shell
     python predict.py forecast-files --mag ../../data/dataBizarre/mag-storm-1h.json --plasma ../../data/dataBizarre/plasma-storm-1h.json --hours 1 --label "mag-storm-1h + plasma-storm-1h"
     ```
+
+## Différentes branches
+
+- test/ddp : essaie pour mettre la distribution en place
+- neural_network : mise en place des intégrales
+- knn : test avec le modèle KNN
