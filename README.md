@@ -1,5 +1,8 @@
 # Projet Aurore Boréale (Avatare)
 
+**Le fichier predict.py est configurée sur un modèle mac donc "mps".
+Si vous voulez utiliser le modèle passer de "mps" à "gpu"**
+
 ## Transformer
 **Avant d’exécuter les commandes veuillez vous positionner dans le dossier transform.**
 
