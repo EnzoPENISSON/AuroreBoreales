@@ -17,7 +17,8 @@ python predict.py retrain
 
 ### Validate
 La commande validate permet d’évaluer les performances du modèle en utilisant les 10 % les plus récents des données, 
-sur lesquels le modèle n’a pas été entraîné.
+sur lesquels il n’a pas été entraîné. Une image sera générée, montrant les données réelles ainsi que les prédictions du 
+modèle.
 ```shell
 python predict.py validate
 ```
